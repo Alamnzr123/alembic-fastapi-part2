@@ -10,91 +10,132 @@ Part 2 : More structure files and use Best Practice.
 
 ## Set Up Project
 
-1. clone repo `https://github.com/Alamnzr123/alembic-fastapi`
-2. Install package: 
+1. clone repo `https://github.com/Alamnzr123/alembic-fastapi-part2`
+2. Continue from `PART 1`
+3. Install package: 
 ```
-pip install fastapi fastapi-sqlalchemy pydantic alembic psycopg2 uvicorn
+pip install databases
+pip install databases[postgresql]
+pip install asyncpg
 ```
-3. Delete this "alembic" folder and Create new using :
+4. Add `db.py`
 
 ```
- alembic init alembic
-```
-4. Open "alembic.ini" and Edit :
-
-```
-sqlalchemy.url = driver://user:pass@localhost/dbname
-```
-
-To :
-
-```
-sqlalchemy.url = 
-```
-
-5. Install env package :
-
-```
-pip install python-dotenv
-```
-
-6. create a .env file :
-
-```
-DATABASE_URL = postgresql+psycopg2://postgres:alam@localhost:5432/alembic_test
-```
-Edit with your configuration
-
-7. Edit "alembic/env.py" :
-
-```
-from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config
-from sqlalchemy import poolfrom alembic import context
-# ---------------- added code here -------------------------#
-import os, sys
+import os
+from databases import Database
 from dotenv import load_dotenv
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import sqlalchemy
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
-sys.path.append(BASE_DIR)
-#------------------------------------------------------------#
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-config = context.config
-# ---------------- added code here -------------------------#
-# this will overwrite the ini-file sqlalchemy.url path
-# with the path given in the config of the main code
-config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
-#------------------------------------------------------------#
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-# ---------------- added code here -------------------------#
-import models
-#------------------------------------------------------------#
-# ---------------- changed code here -------------------------#
-# here target_metadata was equal to None
-target_metadata = models.Base.metadata
-#------------------------------------------------------------#
+db = Database(os.environ["DATABASE_URL"])
+metadata = sqlalchemy.MetaData()
 ```
 
-Do not delete all just edit same as above
+5. Add `app.py`
+
+```
+from db import db
+from fastapi import FastAPI
 
 
-8. make our first migration on PostgreSQL :
+app = FastAPI(title="Async FastAPI")
+
+
+@app.on_event("startup")
+async def startup():
+    await db.connect()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await db.disconnect()
+```
+
+6. change `models.py`
+
+```
+import sqlalchemy
+from db import db, metadata, sqlalchemy
+
+
+users = sqlalchemy.Table(
+    "users",
+    metadata,
+    sqlalchemy.Column("id", sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column("first_name", sqlalchemy.String),
+    sqlalchemy.Column("last_name", sqlalchemy.String),
+    sqlalchemy.Column("age", sqlalchemy.Integer),
+)
+
+
+class User:
+    @classmethod
+    async def get(cls, id):
+        query = users.select().where(users.c.id == id)
+        user = await db.fetch_one(query)
+        return user
+
+    @classmethod
+    async def create(cls, **user):
+        query = users.insert().values(**user)
+        user_id = await db.execute(query)
+        return user_id
+```
+
+7. change `main.py`
+
+```
+import uvicorn
+from models import User as ModelUser
+from schema import User as SchemaUser
+from app import app
+from db import db
+
+
+@app.post("/user/")
+async def create_user(user: SchemaUser):
+    user_id = await ModelUser.create(**user.dict())
+    return {"user_id": user_id}
+
+
+@app.get("/user/{id}", response_model=SchemaUser)
+async def get_user(id: int):
+    user = await ModelUser.get(id)
+    return SchemaUser(**user).dict()
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+we are using async/await
+
+8. Modify Alembic config `alembic/env.py`
+
+FROM 
+```
+import models
+
+target_metadata = models.Base.metadata
+```
+
+TO 
+
+```
+import models
+from db import metadata
+
+target_metadata = metadata
+```
+
+9. make our first migration on PostgreSQL :
 
 ```
 alembic revision --autogenerate -m "First migration"
 ```
 
-9. run the migration :
+10. run the migration :
 
 ```
 alembic upgrade head
@@ -107,7 +148,7 @@ uvicorn main:app
 ```
 
 11. Open PGAdmin4 and find your DB
-12. Open `http://127.0.0.1:8000/docs` FASTAPI SERVER to CREATE data
+12. Open `http://127.0.0.1:8000/docs` FASTAPI SERVER to CREATE, GET data
 or using POSTMAN
 13. DONE.
 
@@ -118,3 +159,6 @@ or using POSTMAN
 alembic
 fastAPI
 Pydantic
+
+## Programming Language
+Python
